@@ -29,6 +29,9 @@ struct xtop_bpf_ctx {
 
 static int libbpf_print_fn(enum libbpf_print_level lvl, const char *fmt, va_list args)
 {
+    // 컴파일 경고 처리용 (lvl 미사용)
+    (void)lvl;
+    
     // verbose일 때만 출력(초기 attach 실패 원인 잡기 위해)
     return vfprintf(stderr, fmt, args);
 }
