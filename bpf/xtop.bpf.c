@@ -21,7 +21,11 @@ static __always_inline __u64 cfg_u64(__u32 k)
     return v ? *v : 0;
 }
 
+<<<<<<< HEAD
 /* pid -> wakeup timestamp(ns) */
+=======
+// pid -> wakeup timestamp(ns)
+>>>>>>> 6e7074a (ebpf 초기 코드)
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 16384);
@@ -29,7 +33,11 @@ struct {
     __type(value, __u64);
 } start SEC(".maps");
 
+<<<<<<< HEAD
 /* log2 histogram buckets [0..63], unit=ns */
+=======
+// log2 histogram buckets [0..63], unit=ns
+>>>>>>> 6e7074a (ebpf 초기 코드)
 struct {
     __uint(type, BPF_MAP_TYPE_ARRAY);
     __uint(max_entries, 64);
