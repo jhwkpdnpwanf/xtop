@@ -14,11 +14,8 @@
 #include "proc_proc.h"
 #include "fmt.h"
 
-<<<<<<< HEAD
-=======
 #include "bpf.h"
 
->>>>>>> 6e7074a (ebpf 초기 코드)
 static void usage(const char *prog) {
     fprintf(stderr,
         "Usage: %s [options]\n"
@@ -27,12 +24,8 @@ static void usage(const char *prog) {
         "  -b           Batch mode (no screen clear)\n"
         "  -k <N>       Show top N processes (default: 20)\n"
         "  -o <key>     Sort by: cpu|mem|time|pid (default: cpu)\n"
-<<<<<<< HEAD
-        "  -p <pid>     Show only specific PID\n",
-=======
         "  -p <pid>     Show only specific PID\n"
         "  -v           Verbose libbpf logs (useful when attach fails)\n",
->>>>>>> 6e7074a (ebpf 초기 코드)
         prog
     );
 }
@@ -46,11 +39,7 @@ static xtop_order_t parse_order(const char *s) {
     return ORDER_CPU;
 }
 
-<<<<<<< HEAD
-static int parse_args(int argc, char **argv, xtop_opts_t *opt) {
-=======
 static int parse_args(int argc, char **argv, xtop_opts_t *opt, int *verbose_bpf) {
->>>>>>> 6e7074a (ebpf 초기 코드)
     *opt = (xtop_opts_t){
         .delay_sec = 1.0,
         .iterations = 0,
@@ -59,16 +48,10 @@ static int parse_args(int argc, char **argv, xtop_opts_t *opt, int *verbose_bpf)
         .order = ORDER_CPU,
         .only_pid = 0,
     };
-<<<<<<< HEAD
-
-    int c;
-    while ((c = getopt(argc, argv, "d:n:bk:o:p:")) != -1) {
-=======
     *verbose_bpf = 0;
 
     int c;
     while ((c = getopt(argc, argv, "d:n:bk:o:p:v")) != -1) {
->>>>>>> 6e7074a (ebpf 초기 코드)
         switch (c) {
         case 'd':
             opt->delay_sec = atof(optarg);
@@ -92,12 +75,9 @@ static int parse_args(int argc, char **argv, xtop_opts_t *opt, int *verbose_bpf)
             opt->only_pid = (pid_t)atoi(optarg);
             if (opt->only_pid < 0) opt->only_pid = 0;
             break;
-<<<<<<< HEAD
-=======
         case 'v':
             *verbose_bpf = 1;
             break;
->>>>>>> 6e7074a (ebpf 초기 코드)
         default:
             usage(argv[0]);
             return -1;
@@ -118,12 +98,8 @@ static void sleep_sec(double sec) {
 
 int main(int argc, char **argv) {
     xtop_opts_t opt;
-<<<<<<< HEAD
-    if (parse_args(argc, argv, &opt) != 0) return 2;
-=======
     int verbose_bpf = 0;
     if (parse_args(argc, argv, &opt, &verbose_bpf) != 0) return 2;
->>>>>>> 6e7074a (ebpf 초기 코드)
 
     long clk_tck = sysconf(_SC_CLK_TCK);
     long page_size = sysconf(_SC_PAGESIZE);
@@ -138,12 +114,7 @@ int main(int argc, char **argv) {
 
     proc_list_t prev = {0}, cur = {0};
 
-<<<<<<< HEAD
-    // 초기 스냅샷
-    if (read_cpu_sample(&cpu_prev) != 0) {
-        fprintf(stderr, "Failed to read /proc/stat\n");
-=======
-    // eBPF 초기화
+    // eBPF init (root일 때만 시도)
     xtop_bpf_ctx_t *bpf_ctx = NULL;
     int bpf_ok = 0;
 
@@ -160,23 +131,16 @@ int main(int argc, char **argv) {
     if (read_cpu_sample(&cpu_prev) != 0) {
         fprintf(stderr, "Failed to read /proc/stat\n");
         xtop_bpf_destroy(bpf_ctx);
->>>>>>> 6e7074a (ebpf 초기 코드)
         return 1;
     }
     if (read_meminfo(&mi) != 0) {
         fprintf(stderr, "Failed to read /proc/meminfo\n");
-<<<<<<< HEAD
-=======
         xtop_bpf_destroy(bpf_ctx);
->>>>>>> 6e7074a (ebpf 초기 코드)
         return 1;
     }
     if (scan_processes(&prev, opt.only_pid) != 0) {
         fprintf(stderr, "Failed to scan /proc\n");
-<<<<<<< HEAD
-=======
         xtop_bpf_destroy(bpf_ctx);
->>>>>>> 6e7074a (ebpf 초기 코드)
         return 1;
     }
 
@@ -184,18 +148,16 @@ int main(int argc, char **argv) {
     for (;;) {
         sleep_sec(opt.delay_sec);
 
-<<<<<<< HEAD
-=======
-        // eBPF 스냅샷
+        // eBPF snapshot (interval delta)
         xtop_bpf_stats_t bst;
         memset(&bst, 0, sizeof(bst));
         if (bpf_ok) {
             if (xtop_bpf_snapshot(bpf_ctx, opt.delay_sec, ncpu, &bst) != 0) {
+                /* attach 후 런타임 실패는 eBPF 끄고 fallback */
                 bpf_ok = 0;
             }
         }
 
->>>>>>> 6e7074a (ebpf 초기 코드)
         if (read_cpu_sample(&cpu_cur) != 0) break;
         if (read_meminfo(&mi) != 0) break;
 
@@ -212,12 +174,10 @@ int main(int argc, char **argv) {
 
         clear_screen_if_needed(opt.batch);
         print_header(&usage_cpu, &mi, &tc, opt.batch);
-<<<<<<< HEAD
-=======
 
         // ATTACK line
         if (bpf_ok) {
-            // 첫 샘플은 0.0이 나올 수 있음
+            // 첫 샘플(워밍업)은 0.0이 나올 수 있음 
             printf("ATTACK: NET_RX softirq %.1f%% | RUNQ p95 %.2f ms\n",
                    bst.net_rx_softirq_pct,
                    bst.runq_p95_ms);
@@ -229,7 +189,6 @@ int main(int argc, char **argv) {
             }
         }
 
->>>>>>> 6e7074a (ebpf 초기 코드)
         print_table(&cur, opt.top_n, opt.batch, clk_tck);
 
         // rotate snapshots
@@ -246,10 +205,7 @@ int main(int argc, char **argv) {
 
     proc_list_free(&prev);
     proc_list_free(&cur);
-<<<<<<< HEAD
-=======
 
     xtop_bpf_destroy(bpf_ctx);
->>>>>>> 6e7074a (ebpf 초기 코드)
     return 0;
 }
