@@ -15,4 +15,3 @@ xtop
 bpf/xtop.bpf.o
 bpf/vmlinux.h
 bpf/collect_xtop_env.sh
->>>>>>> 6e7074a (ebpf 초기 코드)
