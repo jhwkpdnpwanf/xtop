@@ -1,127 +1,140 @@
-// SPDX-License-Identifier: (GPL-2.0 OR BSD-2-Clause)
-#define _GNU_SOURCE
-
+// bpf/xtop.bpf.c
 #include "vmlinux.h"
 #include <bpf/bpf_helpers.h>
-#include <bpf/bpf_tracing.h>
 
-char LICENSE[] SEC("license") = "Dual BSD/GPL";
+char LICENSE[] SEC("license") = "GPL";
 
+#define RQ_BUCKETS 9
+#define SOFTIRQ_VECS 10
+
+
+// /sys/kernel/tracing/events/sched/sched_wakeup/format
+struct sched_wakeup_ctx {
+    __u64 __common;     // common_type/u8/u8/common_pid (8 bytes)
+    char comm[16];
+    __s32 pid;
+    __s32 prio;
+    __s32 success;
+    __s32 target_cpu;
+};
+
+// /sys/kernel/tracing/events/sched/sched_switch/format
+struct sched_switch_ctx {
+    __u64 __common;     // 8 bytes common
+    char prev_comm[16];
+    __s32 prev_pid;
+    __s32 prev_prio;
+    __s64 prev_state;   // "long" on 64-bit kernels -> 8 bytes
+    char next_comm[16];
+    __s32 next_pid;
+    __s32 next_prio;
+};
+
+// /sys/kernel/tracing/events/irq/softirq_entry|exit/format
+struct softirq_ctx {
+    __u64 __common;     // 8 bytes common
+    __u32 vec;
+};
 
 struct {
-    __uint(type, BPF_MAP_TYPE_ARRAY);
-    __uint(max_entries, 2);
-    __type(key, __u32);
-    __type(value, __u64);
-} config_map SEC(".maps");
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 32768);
+    __type(key, __u32);     // pid
+    __type(value, __u64);   // wakeup timestamp ns
+} wakeup_ts SEC(".maps");
 
-static __always_inline __u64 cfg_u64(__u32 k)
-{
-    __u64 *v = bpf_map_lookup_elem(&config_map, &k);
-    return v ? *v : 0;
-}
-
-<<<<<<< HEAD
-/* pid -> wakeup timestamp(ns) */
-=======
-// pid -> wakeup timestamp(ns)
->>>>>>> 6e7074a (ebpf 초기 코드)
 struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 16384);
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __uint(max_entries, RQ_BUCKETS);
     __type(key, __u32);
-    __type(value, __u64);
-} start SEC(".maps");
+    __type(value, __u64);   // count
+} rq_hist SEC(".maps");
 
-<<<<<<< HEAD
-/* log2 histogram buckets [0..63], unit=ns */
-=======
-// log2 histogram buckets [0..63], unit=ns
->>>>>>> 6e7074a (ebpf 초기 코드)
 struct {
-    __uint(type, BPF_MAP_TYPE_ARRAY);
-    __uint(max_entries, 64);
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __uint(max_entries, SOFTIRQ_VECS);
     __type(key, __u32);
-    __type(value, __u64);
-} hist SEC(".maps");
+    __type(value, __u64);   // start ns
+} softirq_start SEC(".maps");
 
-static __always_inline __u32 log2_u64(__u64 v)
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __uint(max_entries, SOFTIRQ_VECS);
+    __type(key, __u32);
+    __type(value, __u64);   // accumulated ns
+} softirq_time SEC(".maps");
+
+static __always_inline __u32 rq_bucket_idx(__u64 delta_us)
 {
-    __u32 r = 0;
-    if (v == 0)
-        return 0;
-
-#pragma unroll
-    for (int i = 0; i < 64; i++) {
-        if (v <= 1)
-            break;
-        v >>= 1;
-        r++;
-    }
-    if (r > 63)
-        r = 63;
-    return r;
+    if (delta_us < 1)   return 0;
+    if (delta_us < 2)   return 1;
+    if (delta_us < 4)   return 2;
+    if (delta_us < 8)   return 3;
+    if (delta_us < 16)  return 4;
+    if (delta_us < 32)  return 5;
+    if (delta_us < 64)  return 6;
+    if (delta_us < 128) return 7;
+    return 8;
 }
 
-static __always_inline int should_track(__u32 pid)
+SEC("tracepoint/sched/sched_wakeup")
+int tp_sched_wakeup(struct sched_wakeup_ctx *ctx)
 {
-    __u64 tp = cfg_u64(1); // targ_pid
-    if (tp == 0)
-        return 1;
-    return pid == (__u32)tp;
-}
-
-
-SEC("tp/sched/sched_wakeup")
-int tp_wakeup(struct trace_event_raw_sched_wakeup_template *ctx)
-{
-    __u32 pid = ctx->pid;
-    if (!should_track(pid))
-        return 0;
-
-    __u64 ts = bpf_ktime_get_ns();
-    bpf_map_update_elem(&start, &pid, &ts, BPF_ANY);
+    __u32 pid = (__u32)ctx->pid;
+    __u64 now = bpf_ktime_get_ns();
+    bpf_map_update_elem(&wakeup_ts, &pid, &now, BPF_ANY);
     return 0;
 }
 
-SEC("tp/sched/sched_wakeup_new")
-int tp_wakeup_new(struct trace_event_raw_sched_wakeup_template *ctx)
+SEC("tracepoint/sched/sched_switch")
+int tp_sched_switch(struct sched_switch_ctx *ctx)
 {
-    __u32 pid = ctx->pid;
-    if (!should_track(pid))
-        return 0;
+    __u32 next_pid = (__u32)ctx->next_pid;
 
-    __u64 ts = bpf_ktime_get_ns();
-    bpf_map_update_elem(&start, &pid, &ts, BPF_ANY);
-    return 0;
-}
-
-
-SEC("tp/sched/sched_switch")
-int tp_switch(struct trace_event_raw_sched_switch *ctx)
-{
-    __u32 next_pid = ctx->next_pid;
-    if (!should_track(next_pid))
-        return 0;
-
-    __u64 *tsp = bpf_map_lookup_elem(&start, &next_pid);
+    __u64 *tsp = bpf_map_lookup_elem(&wakeup_ts, &next_pid);
     if (!tsp)
         return 0;
 
     __u64 now = bpf_ktime_get_ns();
-    __u64 delta = now - *tsp;
+    __u64 delta_us = (now - *tsp) / 1000;
 
-    bpf_map_delete_elem(&start, &next_pid);
+    __u32 idx = rq_bucket_idx(delta_us);
+    __u64 *cnt = bpf_map_lookup_elem(&rq_hist, &idx);
+    if (cnt)
+        __sync_fetch_and_add(cnt, 1);
 
-    __u64 min_ns = cfg_u64(0);
-    if (min_ns && delta < min_ns)
-        return 0;
+    bpf_map_delete_elem(&wakeup_ts, &next_pid);
+    return 0;
+}
 
-    __u32 slot = log2_u64(delta);
-    __u64 *cnt = bpf_map_lookup_elem(&hist, &slot);
-    if (!cnt)
-        return 0;
+SEC("tracepoint/irq/softirq_entry")
+int tp_softirq_entry(struct softirq_ctx *ctx)
+{
+    __u32 vec = ctx->vec;
+    if (vec >= SOFTIRQ_VECS) return 0;
 
-    __sync_fetch_and_add(cnt, 1);
+    __u64 now = bpf_ktime_get_ns();
+    bpf_map_update_elem(&softirq_start, &vec, &now, BPF_ANY);
+    return 0;
+}
+
+SEC("tracepoint/irq/softirq_exit")
+int tp_softirq_exit(struct softirq_ctx *ctx)
+{
+    __u32 vec = ctx->vec;
+    if (vec >= SOFTIRQ_VECS) return 0;
+
+    __u64 *startp = bpf_map_lookup_elem(&softirq_start, &vec);
+    if (!startp || *startp == 0) return 0;
+
+    __u64 now = bpf_ktime_get_ns();
+    __u64 delta = now - *startp;
+
+    __u64 *acc = bpf_map_lookup_elem(&softirq_time, &vec);
+    if (acc)
+        __sync_fetch_and_add(acc, delta);
+
+    __u64 zero = 0;
+    bpf_map_update_elem(&softirq_start, &vec, &zero, BPF_ANY);
     return 0;
 }
